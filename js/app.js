@@ -12,7 +12,7 @@ import {
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { t, getLang, setLang, applyDocumentDirection } from "./i18n.js";
-import { escapeHtml, slugify, percent, LIMITS } from "./shared.js";
+import { escapeHtml, slugify, percent, localize, LIMITS } from "./shared.js";
 
 let uid = null;
 
@@ -274,7 +274,7 @@ function renderItems() {
             >
               <span class="vote-option__bar" style="width:${pct}%"></span>
               <span class="vote-option__content">
-                <span class="vote-option__label">${escapeHtml(opt.label)}</span>
+                <span class="vote-option__label">${escapeHtml(localize(opt, "label", lang))}</span>
                 <span class="vote-option__count">${count} ${count === 1 ? t("vote", lang) : t("votes", lang)} · ${pct}%</span>
               </span>
             </button>`;
@@ -283,8 +283,8 @@ function renderItems() {
 
       return `
         <article class="item-card">
-          <h3 class="item-card__name">${escapeHtml(item.name)}</h3>
-          <p class="item-card__question">${escapeHtml(item.question)}</p>
+          <h3 class="item-card__name">${escapeHtml(localize(item, "name", lang))}</h3>
+          <p class="item-card__question">${escapeHtml(localize(item, "question", lang))}</p>
           <div class="item-card__options">${optionsHtml}</div>
         </article>`;
     })
@@ -320,7 +320,7 @@ function renderResults() {
           const pct = percent(count, total);
           return `
             <div class="results-row">
-              <span class="results-row__label">${escapeHtml(opt.label)}</span>
+              <span class="results-row__label">${escapeHtml(localize(opt, "label", lang))}</span>
               <div class="results-row__track"><div class="results-row__fill" style="width:${pct}%"></div></div>
               <span class="results-row__pct">${pct}%</span>
             </div>`;
@@ -328,7 +328,7 @@ function renderResults() {
         .join("");
       return `
         <div class="results-item">
-          <h4 class="results-item__name">${escapeHtml(item.name)}</h4>
+          <h4 class="results-item__name">${escapeHtml(localize(item, "name", lang))}</h4>
           ${rows}
         </div>`;
     })

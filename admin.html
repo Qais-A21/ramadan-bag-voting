@@ -46,8 +46,10 @@
       <section class="card-panel">
         <h2 class="section-heading">Add New Item</h2>
         <form id="adminAddItemForm" class="space-y-3">
-          <input id="adminItemName" type="text" class="form-input" placeholder="Item name" maxlength="100" required />
-          <input id="adminItemQuestion" type="text" class="form-input" placeholder="Question" maxlength="200" required />
+          <input id="adminItemName" type="text" class="form-input" placeholder="Item name (English)" maxlength="100" required />
+          <input id="adminItemNameAr" type="text" dir="rtl" class="form-input" placeholder="اسم العنصر (عربي) — اختياري" maxlength="100" />
+          <input id="adminItemQuestion" type="text" class="form-input" placeholder="Question (English)" maxlength="200" required />
+          <input id="adminItemQuestionAr" type="text" dir="rtl" class="form-input" placeholder="السؤال (عربي) — اختياري" maxlength="200" />
           <div id="adminOptionsContainer" class="space-y-2"></div>
           <button id="adminAddOptionBtn" type="button" class="btn-link">+ Add option</button>
           <p id="adminItemFormError" class="form-error"></p>

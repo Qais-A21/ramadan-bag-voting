@@ -173,20 +173,29 @@ async function toggleActive(itemId, active) {
   await updateDoc(doc(db, "items", itemId), { active });
 }
 
-async function addItemAsAdmin(name, question, options) {
+// `options` entries may be a plain string label, or { label, labelAr } to
+// also carry an Arabic translation. `extra` may carry { nameAr, questionAr }.
+function normalizeOption(opt) {
+  return typeof opt === "string" ? { label: opt } : opt;
+}
+
+async function addItemAsAdmin(name, question, options, extra = {}) {
   const itemRef = doc(collection(db, "items"));
   const batch = writeBatch(db);
   batch.set(itemRef, {
     name,
     question,
+    ...(extra.nameAr ? { nameAr: extra.nameAr } : {}),
+    ...(extra.questionAr ? { questionAr: extra.questionAr } : {}),
     active: true,
     order: Date.now(),
     createdAt: serverTimestamp(),
     createdBy: currentUid,
   });
-  options.forEach((label, idx) => {
+  options.forEach((opt, idx) => {
+    const o = normalizeOption(opt);
     const optRef = doc(collection(db, "items", itemRef.id, "options"));
-    batch.set(optRef, { label, order: idx });
+    batch.set(optRef, { label: o.label, ...(o.labelAr ? { labelAr: o.labelAr } : {}), order: idx });
   });
   await batch.commit();
 }
@@ -343,10 +352,50 @@ function renderAdminSuggestions() {
 // ---------- Seed demo data ----------
 
 const SEED_ITEMS = [
-  { name: "Rice", question: "How much rice would you prefer?", options: ["3 KG", "4 KG", "5 KG"] },
-  { name: "Pasta", question: "How much pasta would you prefer?", options: ["1 KG", "2 KG", "3 KG"] },
-  { name: "Oil", question: "How much oil would you prefer?", options: ["1 bottle", "2 bottles", "3 bottles"] },
-  { name: "Beans", question: "How much beans would you prefer?", options: ["1 pack", "2 packs", "3 packs"] },
+  {
+    name: "Rice",
+    nameAr: "أرز",
+    question: "How much rice would you prefer?",
+    questionAr: "كم كمية الأرز المفضلة لديك؟",
+    options: [
+      { label: "3 KG", labelAr: "3 كجم" },
+      { label: "4 KG", labelAr: "4 كجم" },
+      { label: "5 KG", labelAr: "5 كجم" },
+    ],
+  },
+  {
+    name: "Pasta",
+    nameAr: "مكرونة",
+    question: "How much pasta would you prefer?",
+    questionAr: "كم كمية المكرونة المفضلة لديك؟",
+    options: [
+      { label: "1 KG", labelAr: "1 كجم" },
+      { label: "2 KG", labelAr: "2 كجم" },
+      { label: "3 KG", labelAr: "3 كجم" },
+    ],
+  },
+  {
+    name: "Oil",
+    nameAr: "زيت",
+    question: "How much oil would you prefer?",
+    questionAr: "كم كمية الزيت المفضلة لديك؟",
+    options: [
+      { label: "1 bottle", labelAr: "1 زجاجة" },
+      { label: "2 bottles", labelAr: "2 زجاجة" },
+      { label: "3 bottles", labelAr: "3 زجاجات" },
+    ],
+  },
+  {
+    name: "Beans",
+    nameAr: "فول",
+    question: "How much beans would you prefer?",
+    questionAr: "كم كمية الفول المفضلة لديك؟",
+    options: [
+      { label: "1 pack", labelAr: "1 عبوة" },
+      { label: "2 packs", labelAr: "2 عبوة" },
+      { label: "3 packs", labelAr: "3 عبوات" },
+    ],
+  },
 ];
 
 el("seedDataBtn").addEventListener("click", async () => {
@@ -354,7 +403,10 @@ el("seedDataBtn").addEventListener("click", async () => {
   el("seedDataBtn").textContent = "Seeding…";
   try {
     for (const item of SEED_ITEMS) {
-      await addItemAsAdmin(item.name, item.question, item.options);
+      await addItemAsAdmin(item.name, item.question, item.options, {
+        nameAr: item.nameAr,
+        questionAr: item.questionAr,
+      });
     }
     el("seedDataBtn").textContent = "Done! Seeded Rice / Pasta / Oil / Beans";
   } catch (err) {
@@ -374,6 +426,7 @@ function addAdminOptionField() {
   wrapper.className = "option-field";
   wrapper.innerHTML = `
     <input type="text" class="option-input" maxlength="${LIMITS.optionLabel}" placeholder="e.g. 2 KG" />
+    <input type="text" class="option-input" dir="rtl" maxlength="${LIMITS.optionLabel}" placeholder="عربي — اختياري" />
     <button type="button" class="option-remove">&times;</button>
   `;
   wrapper.querySelector(".option-remove").addEventListener("click", () => {
@@ -388,18 +441,27 @@ el("adminAddOptionBtn").addEventListener("click", addAdminOptionField);
 el("adminAddItemForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = el("adminItemName").value.trim();
+  const nameAr = el("adminItemNameAr").value.trim();
   const question = el("adminItemQuestion").value.trim();
-  const options = [...optionsContainer.querySelectorAll(".option-input")]
-    .map((i) => i.value.trim())
+  const questionAr = el("adminItemQuestionAr").value.trim();
+  const options = [...optionsContainer.children]
+    .map((wrapper) => {
+      const [enInput, arInput] = wrapper.querySelectorAll(".option-input");
+      const label = enInput.value.trim();
+      const labelAr = arInput.value.trim();
+      return label ? (labelAr ? { label, labelAr } : label) : null;
+    })
     .filter(Boolean);
   const errorEl = el("adminItemFormError");
   if (!name || !question || options.length < LIMITS.minOptions) {
     errorEl.textContent = "Please fill in all fields and provide at least 2 options.";
     return;
   }
-  await addItemAsAdmin(name, question, options);
+  await addItemAsAdmin(name, question, options, { nameAr, questionAr });
   el("adminItemName").value = "";
+  el("adminItemNameAr").value = "";
   el("adminItemQuestion").value = "";
+  el("adminItemQuestionAr").value = "";
   optionsContainer.innerHTML = "";
   addAdminOptionField();
   addAdminOptionField();

@@ -13,6 +13,15 @@ export function slugify(name) {
     .slice(0, 60) || `item-${Date.now()}`;
 }
 
+// Returns obj[`${field}Ar`] when lang is Arabic and that field exists,
+// otherwise falls back to obj[field]. Lets seeded/admin-entered content
+// carry real Arabic translations while user-submitted content (which can't
+// be auto-translated) still renders fine via the fallback.
+export function localize(obj, field, lang) {
+  if (lang === "ar" && obj[`${field}Ar`]) return obj[`${field}Ar`];
+  return obj[field];
+}
+
 export function percent(part, total) {
   if (!total) return 0;
   return Math.round((part / total) * 100);
