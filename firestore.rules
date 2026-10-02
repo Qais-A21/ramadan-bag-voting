@@ -1,0 +1,112 @@
+rules_version = '2';
+
+// Design note: vote and suggestion "counts" are never stored as mutable
+// counter fields. Each vote/suggestion-bump is its own document, owned by
+// the user who wrote it, and every client tallies results by listening to
+// the relevant subcollection live. This means there is no counter field a
+// malicious client could overwrite directly (e.g. no `voteCount: 10000`
+// attack is possible) — the only thing anyone can ever write is their own
+// single vote/suggestion document.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ---------------- admins ----------------
+    // Admin membership is managed manually from the Firebase console / a trusted
+    // backend. No client, including admins themselves, can grant admin via rules.
+    match /admins/{uid} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ---------------- items ----------------
+    match /items/{itemId} {
+      allow read: if true;
+
+      // Any signed-in user (anonymous included) can propose a new item,
+      // but only with well-formed data and only as "active" immediately.
+      allow create: if isSignedIn() && isValidNewItem();
+
+      // Only admins can edit item metadata (name/question) or deactivate/delete.
+      allow update, delete: if isAdmin();
+
+      function isValidNewItem() {
+        let d = request.resource.data;
+        return d.name is string && d.name.size() > 0 && d.name.size() <= 100 &&
+          d.question is string && d.question.size() > 0 && d.question.size() <= 200 &&
+          d.active == true &&
+          d.createdBy == request.auth.uid &&
+          d.order is number;
+      }
+
+      match /options/{optionId} {
+        allow read: if true;
+
+        // New options can be added as part of the item-creation flow (any
+        // signed-in user), or freely by admins. Options are immutable once
+        // created — there is no vote-count field on them to tamper with.
+        allow create: if isAdmin() || (isSignedIn() && isValidNewOption());
+        allow update, delete: if isAdmin();
+
+        function isValidNewOption() {
+          let d = request.resource.data;
+          return d.label is string && d.label.size() > 0 && d.label.size() <= 50 &&
+            d.order is number;
+        }
+      }
+    }
+
+    // ---------------- votes ----------------
+    // votes/{itemId}/voters/{uid} — one doc per user per item; doc id IS the
+    // user's own uid, which structurally prevents voting as someone else and
+    // prevents more than one active vote per item per user. Read is public
+    // so every client can tally live, anonymous results — the uid reveals
+    // nothing beyond the fact that an anonymous session exists.
+    match /votes/{itemId}/voters/{uid} {
+      allow read: if true;
+
+      allow create, update: if isSignedIn() && request.auth.uid == uid &&
+        request.resource.data.optionId is string &&
+        exists(/databases/$(database)/documents/items/$(itemId)/options/$(request.resource.data.optionId));
+
+      allow delete: if false;
+    }
+
+    // ---------------- suggestions ----------------
+    match /suggestions/{suggestionId} {
+      allow read: if true;
+
+      allow create: if isSignedIn() && isValidNewSuggestion();
+
+      // Only admins change status (approve/reject). Suggestion "popularity"
+      // is derived from the voters subcollection below, not a stored count.
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+
+      function isValidNewSuggestion() {
+        let d = request.resource.data;
+        return d.name is string && d.name.size() > 0 && d.name.size() <= 60 &&
+          d.status == 'pending' &&
+          d.createdBy == request.auth.uid;
+      }
+
+      match /voters/{uid} {
+        allow read: if true;
+        // One doc per user per suggestion; re-"suggesting" becomes an update
+        // (doc already exists) which is disallowed, so duplicates are
+        // structurally rejected rather than silently double-counted.
+        allow create: if isSignedIn() && request.auth.uid == uid;
+        allow update, delete: if false;
+      }
+    }
+  }
+}

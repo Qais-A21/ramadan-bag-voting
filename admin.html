@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ramadan Bag — Admin</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="css/styles.css" />
+<style>
+  .admin-card { background:#fff; border:1px solid #ecdfc4; border-radius:0.9rem; padding:1rem; margin-bottom:0.9rem; }
+  .admin-card--inactive { opacity:0.55; }
+</style>
+</head>
+<body class="min-h-screen bg-[var(--bg)] text-stone-800">
+  <div class="max-w-3xl mx-auto px-4 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-extrabold text-emerald-900">Ramadan Bag — Admin</h1>
+      <a href="index.html" class="btn-secondary text-sm">View public page</a>
+    </div>
+
+    <div id="loginPanel" class="card-panel max-w-sm mx-auto">
+      <h2 class="section-heading">Admin Login</h2>
+      <form id="loginForm" class="space-y-3">
+        <input id="adminEmail" type="email" class="form-input" placeholder="Admin email" required />
+        <input id="adminPassword" type="password" class="form-input" placeholder="Password" required />
+        <p id="loginError" class="form-error"></p>
+        <button type="submit" class="btn-primary w-full">Log in</button>
+      </form>
+      <p class="text-xs text-stone-500 mt-3">
+        First time? Create a user in Firebase Authentication (Email/Password), then add a document at
+        <code>admins/&lt;that user's UID&gt;</code> in Firestore to grant admin access.
+      </p>
+    </div>
+
+    <div id="adminPanel" class="hidden space-y-8">
+      <div class="flex justify-end">
+        <button id="logoutBtn" class="btn-secondary text-sm">Log out</button>
+      </div>
+
+      <section class="card-panel">
+        <h2 class="section-heading">Seed Demo Data</h2>
+        <p class="text-sm text-stone-500 mb-3">Creates the starter items (Rice, Pasta, Oil, Beans) with their default quantity options. Safe to click once; click again later if you want to re-add them after deleting.</p>
+        <button id="seedDataBtn" class="btn-secondary">Seed Rice / Pasta / Oil / Beans</button>
+      </section>
+
+      <section class="card-panel">
+        <h2 class="section-heading">Add New Item</h2>
+        <form id="adminAddItemForm" class="space-y-3">
+          <input id="adminItemName" type="text" class="form-input" placeholder="Item name" maxlength="100" required />
+          <input id="adminItemQuestion" type="text" class="form-input" placeholder="Question" maxlength="200" required />
+          <div id="adminOptionsContainer" class="space-y-2"></div>
+          <button id="adminAddOptionBtn" type="button" class="btn-link">+ Add option</button>
+          <p id="adminItemFormError" class="form-error"></p>
+          <button type="submit" class="btn-primary">Add Item</button>
+        </form>
+      </section>
+
+      <section>
+        <h2 class="section-heading">Pending Suggestions</h2>
+        <div id="adminSuggestionsList"></div>
+      </section>
+
+      <section>
+        <h2 class="section-heading">All Items &amp; Results</h2>
+        <div id="adminItemsList"></div>
+      </section>
+    </div>
+  </div>
+
+  <script type="module" src="js/admin.js"></script>
+</body>
+</html>
