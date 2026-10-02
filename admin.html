@@ -39,7 +39,7 @@
 
       <section class="card-panel">
         <h2 class="section-heading">Seed Demo Data</h2>
-        <p class="text-sm text-stone-500 mb-3">Creates the starter items (Rice, Pasta, Oil, Beans) with their default quantity options. Safe to click once; click again later if you want to re-add them after deleting.</p>
+        <p class="text-sm text-stone-500 mb-3">Creates the starter items (Rice, Pasta, Oil, Beans) with their units and Arabic translations. Safe to click once; click again later if you want to re-add them after deleting.</p>
         <button id="seedDataBtn" class="btn-secondary">Seed Rice / Pasta / Oil / Beans</button>
       </section>
 
@@ -50,8 +50,8 @@
           <input id="adminItemNameAr" type="text" dir="rtl" class="form-input" placeholder="اسم العنصر (عربي) — اختياري" maxlength="100" />
           <input id="adminItemQuestion" type="text" class="form-input" placeholder="Question (English)" maxlength="200" required />
           <input id="adminItemQuestionAr" type="text" dir="rtl" class="form-input" placeholder="السؤال (عربي) — اختياري" maxlength="200" />
-          <div id="adminOptionsContainer" class="space-y-2"></div>
-          <button id="adminAddOptionBtn" type="button" class="btn-link">+ Add option</button>
+          <input id="adminItemUnit" type="text" class="form-input" placeholder="Unit (English) — e.g. KG, bottles, packs" maxlength="20" required />
+          <input id="adminItemUnitAr" type="text" dir="rtl" class="form-input" placeholder="الوحدة (عربي) — اختياري" maxlength="20" />
           <p id="adminItemFormError" class="form-error"></p>
           <button type="submit" class="btn-primary">Add Item</button>
         </form>

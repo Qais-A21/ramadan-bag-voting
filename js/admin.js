@@ -12,20 +12,20 @@ import {
   query,
   orderBy,
   where,
+  setDoc,
   writeBatch,
   updateDoc,
+  deleteDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { t, getLang, setLang, applyDocumentDirection } from "./i18n.js";
-import { escapeHtml, percent, LIMITS } from "./shared.js";
+import { escapeHtml, percent } from "./shared.js";
 
 function el(id) {
   return document.getElementById(id);
 }
 
 let currentUid = null;
-const itemsState = new Map(); // itemId -> { item, options: Map, voteCounts: Map }
-const optionUnsubs = new Map();
+const itemsState = new Map(); // itemId -> { item, quantityCounts: Map }
 const voterUnsubs = new Map();
 let itemsOrder = [];
 const suggestionsState = new Map(); // suggestionId -> { data, voterCount }
@@ -89,17 +89,13 @@ function watchItems() {
       const existing = itemsState.get(d.id);
       itemsState.set(d.id, {
         item: { id: d.id, ...d.data() },
-        options: existing?.options || new Map(),
-        voteCounts: existing?.voteCounts || new Map(),
+        quantityCounts: existing?.quantityCounts || new Map(),
       });
-      if (!optionUnsubs.has(d.id)) watchOptions(d.id);
       if (!voterUnsubs.has(d.id)) watchVoters(d.id);
     });
     for (const id of [...itemsState.keys()]) {
       if (!seen.has(id)) {
         itemsState.delete(id);
-        optionUnsubs.get(id)?.();
-        optionUnsubs.delete(id);
         voterUnsubs.get(id)?.();
         voterUnsubs.delete(id);
       }
@@ -108,29 +104,16 @@ function watchItems() {
   });
 }
 
-function watchOptions(itemId) {
-  const q = query(collection(db, "items", itemId, "options"), orderBy("order", "asc"));
-  const unsub = onSnapshot(q, (snap) => {
-    const state = itemsState.get(itemId);
-    if (!state) return;
-    const options = new Map();
-    snap.forEach((d) => options.set(d.id, { id: d.id, ...d.data() }));
-    state.options = options;
-    renderAdminItems();
-  });
-  optionUnsubs.set(itemId, unsub);
-}
-
 function watchVoters(itemId) {
   const unsub = onSnapshot(collection(db, "votes", itemId, "voters"), (snap) => {
     const state = itemsState.get(itemId);
     if (!state) return;
     const counts = new Map();
     snap.forEach((d) => {
-      const optionId = d.data().optionId;
-      counts.set(optionId, (counts.get(optionId) || 0) + 1);
+      const qty = d.data().quantity;
+      counts.set(qty, (counts.get(qty) || 0) + 1);
     });
-    state.voteCounts = counts;
+    state.quantityCounts = counts;
     renderAdminItems();
   });
   voterUnsubs.set(itemId, unsub);
@@ -173,52 +156,37 @@ async function toggleActive(itemId, active) {
   await updateDoc(doc(db, "items", itemId), { active });
 }
 
-// `options` entries may be a plain string label, or { label, labelAr } to
-// also carry an Arabic translation. `extra` may carry { nameAr, questionAr }.
-function normalizeOption(opt) {
-  return typeof opt === "string" ? { label: opt } : opt;
+async function deleteItem(itemId) {
+  await deleteDoc(doc(db, "items", itemId));
 }
 
-async function addItemAsAdmin(name, question, options, extra = {}) {
+async function addItemAsAdmin(name, question, unit, extra = {}) {
   const itemRef = doc(collection(db, "items"));
-  const batch = writeBatch(db);
-  batch.set(itemRef, {
+  await setDoc(itemRef, {
     name,
     question,
+    unit,
     ...(extra.nameAr ? { nameAr: extra.nameAr } : {}),
     ...(extra.questionAr ? { questionAr: extra.questionAr } : {}),
+    ...(extra.unitAr ? { unitAr: extra.unitAr } : {}),
     active: true,
     order: Date.now(),
     createdAt: serverTimestamp(),
     createdBy: currentUid,
   });
-  options.forEach((opt, idx) => {
-    const o = normalizeOption(opt);
-    const optRef = doc(collection(db, "items", itemRef.id, "options"));
-    batch.set(optRef, { label: o.label, ...(o.labelAr ? { labelAr: o.labelAr } : {}), order: idx });
-  });
-  await batch.commit();
 }
 
-async function addOptionToItem(itemId, label, nextOrder) {
-  const optRef = doc(collection(db, "items", itemId, "options"));
-  await writeBatch(db).set(optRef, { label, order: nextOrder }).commit();
-}
-
-async function approveSuggestion(suggestionId, name, question, options) {
+async function approveSuggestion(suggestionId, name, question, unit) {
   const itemRef = doc(collection(db, "items"));
   const batch = writeBatch(db);
   batch.set(itemRef, {
     name,
     question,
+    unit,
     active: true,
     order: Date.now(),
     createdAt: serverTimestamp(),
     createdBy: currentUid,
-  });
-  options.forEach((label, idx) => {
-    const optRef = doc(collection(db, "items", itemRef.id, "options"));
-    batch.set(optRef, { label, order: idx });
   });
   batch.update(doc(db, "suggestions", suggestionId), { status: "approved" });
   await batch.commit();
@@ -230,6 +198,10 @@ async function rejectSuggestion(suggestionId) {
 
 // ---------- Rendering ----------
 
+function formatQty(qty) {
+  return Number.isInteger(qty) ? String(qty) : String(qty).replace(/\.0$/, "");
+}
+
 function renderAdminItems() {
   const container = el("adminItemsList");
   if (itemsOrder.length === 0) {
@@ -240,15 +212,14 @@ function renderAdminItems() {
     .map((itemId) => {
       const state = itemsState.get(itemId);
       if (!state) return "";
-      const { item, options, voteCounts } = state;
-      const optionsArr = [...options.values()];
-      const total = optionsArr.reduce((s, o) => s + (voteCounts.get(o.id) || 0), 0);
-      const rows = optionsArr
-        .map((o) => {
-          const count = voteCounts.get(o.id) || 0;
+      const { item, quantityCounts } = state;
+      const total = [...quantityCounts.values()].reduce((a, b) => a + b, 0);
+      const sortedEntries = [...quantityCounts.entries()].sort((a, b) => a[0] - b[0]);
+      const rows = sortedEntries
+        .map(([qty, count]) => {
           return `
           <li class="flex items-center justify-between text-sm py-1 border-b border-stone-100">
-            <span>${escapeHtml(o.label)}</span>
+            <span>${formatQty(qty)} ${escapeHtml(item.unit)}</span>
             <span class="font-semibold">${count} votes (${percent(count, total)}%)</span>
           </li>`;
         })
@@ -257,16 +228,15 @@ function renderAdminItems() {
         <div class="admin-card ${item.active ? "" : "admin-card--inactive"}">
           <div class="flex items-center justify-between">
             <h3 class="font-bold text-lg">${escapeHtml(item.name)} ${item.active ? "" : "<span class='text-xs text-red-600'>(inactive)</span>"}</h3>
-            <button class="btn-secondary text-sm" data-toggle-active="${item.id}" data-active="${item.active}">
-              ${item.active ? "Deactivate" : "Activate"}
-            </button>
+            <div class="flex gap-2">
+              <button class="btn-secondary text-sm" data-toggle-active="${item.id}" data-active="${item.active}">
+                ${item.active ? "Deactivate" : "Activate"}
+              </button>
+              <button class="btn-secondary text-sm text-red-600" data-delete="${item.id}">Delete</button>
+            </div>
           </div>
-          <p class="text-stone-500 text-sm mb-2">${escapeHtml(item.question)}</p>
-          <ul class="mb-2">${rows}</ul>
-          <form class="flex gap-2" data-add-option-form="${item.id}">
-            <input type="text" class="form-input text-sm" placeholder="New option label" maxlength="${LIMITS.optionLabel}" required />
-            <button type="submit" class="btn-primary text-sm whitespace-nowrap">Add option</button>
-          </form>
+          <p class="text-stone-500 text-sm mb-2">${escapeHtml(item.question)} (unit: ${escapeHtml(item.unit)})</p>
+          <ul class="mb-2">${rows || '<li class="text-sm text-stone-400 py-1">No answers yet.</li>'}</ul>
         </div>`;
     })
     .join("");
@@ -277,17 +247,11 @@ function renderAdminItems() {
       toggleActive(btn.dataset.toggleActive, !active);
     });
   });
-  container.querySelectorAll("[data-add-option-form]").forEach((form) => {
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const itemId = form.dataset.addOptionForm;
-      const input = form.querySelector("input");
-      const label = input.value.trim();
-      if (!label) return;
-      const state = itemsState.get(itemId);
-      const nextOrder = state ? state.options.size : 0;
-      await addOptionToItem(itemId, label, nextOrder);
-      input.value = "";
+  container.querySelectorAll("[data-delete]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (confirm("Permanently delete this item? This cannot be undone (consider Deactivate instead if you just want to hide it).")) {
+        deleteItem(btn.dataset.delete);
+      }
     });
   });
 }
@@ -313,7 +277,7 @@ function renderAdminSuggestions() {
         </div>
         <form class="approve-form hidden space-y-2" data-approve-form="${s.data.id}">
           <input type="text" class="form-input text-sm" data-field="question" placeholder="Question (e.g. How much ${escapeHtml(name)} would you prefer?)" required />
-          <input type="text" class="form-input text-sm" data-field="options" placeholder="Options, comma separated (e.g. 1 KG, 2 KG, 3 KG)" required />
+          <input type="text" class="form-input text-sm" data-field="unit" placeholder="Unit (e.g. KG, bottles, packs)" required />
           <button type="submit" class="btn-primary text-sm">Create Item</button>
         </form>
       </div>`;
@@ -335,16 +299,12 @@ function renderAdminSuggestions() {
       const suggestionId = form.dataset.approveForm;
       const suggestion = suggestionsState.get(suggestionId);
       const question = form.querySelector('[data-field="question"]').value.trim();
-      const options = form
-        .querySelector('[data-field="options"]')
-        .value.split(",")
-        .map((o) => o.trim())
-        .filter(Boolean);
-      if (!question || options.length < LIMITS.minOptions) {
-        alert("Please provide a question and at least 2 options.");
+      const unit = form.querySelector('[data-field="unit"]').value.trim();
+      if (!question || !unit) {
+        alert("Please provide a question and a unit.");
         return;
       }
-      await approveSuggestion(suggestionId, suggestion.data.name, question, options);
+      await approveSuggestion(suggestionId, suggestion.data.name, question, unit);
     });
   });
 }
@@ -352,50 +312,10 @@ function renderAdminSuggestions() {
 // ---------- Seed demo data ----------
 
 const SEED_ITEMS = [
-  {
-    name: "Rice",
-    nameAr: "أرز",
-    question: "How much rice would you prefer?",
-    questionAr: "كم كمية الأرز المفضلة لديك؟",
-    options: [
-      { label: "3 KG", labelAr: "3 كجم" },
-      { label: "4 KG", labelAr: "4 كجم" },
-      { label: "5 KG", labelAr: "5 كجم" },
-    ],
-  },
-  {
-    name: "Pasta",
-    nameAr: "مكرونة",
-    question: "How much pasta would you prefer?",
-    questionAr: "كم كمية المكرونة المفضلة لديك؟",
-    options: [
-      { label: "1 KG", labelAr: "1 كجم" },
-      { label: "2 KG", labelAr: "2 كجم" },
-      { label: "3 KG", labelAr: "3 كجم" },
-    ],
-  },
-  {
-    name: "Oil",
-    nameAr: "زيت",
-    question: "How much oil would you prefer?",
-    questionAr: "كم كمية الزيت المفضلة لديك؟",
-    options: [
-      { label: "1 bottle", labelAr: "1 زجاجة" },
-      { label: "2 bottles", labelAr: "2 زجاجة" },
-      { label: "3 bottles", labelAr: "3 زجاجات" },
-    ],
-  },
-  {
-    name: "Beans",
-    nameAr: "فول",
-    question: "How much beans would you prefer?",
-    questionAr: "كم كمية الفول المفضلة لديك؟",
-    options: [
-      { label: "1 pack", labelAr: "1 عبوة" },
-      { label: "2 packs", labelAr: "2 عبوة" },
-      { label: "3 packs", labelAr: "3 عبوات" },
-    ],
-  },
+  { name: "Rice", nameAr: "أرز", question: "How much rice would you prefer?", questionAr: "كم كمية الأرز المفضلة لديك؟", unit: "KG", unitAr: "كجم" },
+  { name: "Pasta", nameAr: "مكرونة", question: "How much pasta would you prefer?", questionAr: "كم كمية المكرونة المفضلة لديك؟", unit: "KG", unitAr: "كجم" },
+  { name: "Oil", nameAr: "زيت", question: "How much oil would you prefer?", questionAr: "كم كمية الزيت المفضلة لديك؟", unit: "bottles", unitAr: "زجاجة" },
+  { name: "Beans", nameAr: "فول", question: "How much beans would you prefer?", questionAr: "كم كمية الفول المفضلة لديك؟", unit: "packs", unitAr: "عبوة" },
 ];
 
 el("seedDataBtn").addEventListener("click", async () => {
@@ -403,9 +323,10 @@ el("seedDataBtn").addEventListener("click", async () => {
   el("seedDataBtn").textContent = "Seeding…";
   try {
     for (const item of SEED_ITEMS) {
-      await addItemAsAdmin(item.name, item.question, item.options, {
+      await addItemAsAdmin(item.name, item.question, item.unit, {
         nameAr: item.nameAr,
         questionAr: item.questionAr,
+        unitAr: item.unitAr,
       });
     }
     el("seedDataBtn").textContent = "Done! Seeded Rice / Pasta / Oil / Beans";
@@ -419,51 +340,25 @@ el("seedDataBtn").addEventListener("click", async () => {
 
 // ---------- Admin add-item form ----------
 
-const optionsContainer = el("adminOptionsContainer");
-function addAdminOptionField() {
-  if (optionsContainer.children.length >= LIMITS.maxOptions) return;
-  const wrapper = document.createElement("div");
-  wrapper.className = "option-field";
-  wrapper.innerHTML = `
-    <input type="text" class="option-input" maxlength="${LIMITS.optionLabel}" placeholder="e.g. 2 KG" />
-    <input type="text" class="option-input" dir="rtl" maxlength="${LIMITS.optionLabel}" placeholder="عربي — اختياري" />
-    <button type="button" class="option-remove">&times;</button>
-  `;
-  wrapper.querySelector(".option-remove").addEventListener("click", () => {
-    if (optionsContainer.children.length > LIMITS.minOptions) wrapper.remove();
-  });
-  optionsContainer.appendChild(wrapper);
-}
-addAdminOptionField();
-addAdminOptionField();
-el("adminAddOptionBtn").addEventListener("click", addAdminOptionField);
-
 el("adminAddItemForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = el("adminItemName").value.trim();
   const nameAr = el("adminItemNameAr").value.trim();
   const question = el("adminItemQuestion").value.trim();
   const questionAr = el("adminItemQuestionAr").value.trim();
-  const options = [...optionsContainer.children]
-    .map((wrapper) => {
-      const [enInput, arInput] = wrapper.querySelectorAll(".option-input");
-      const label = enInput.value.trim();
-      const labelAr = arInput.value.trim();
-      return label ? (labelAr ? { label, labelAr } : label) : null;
-    })
-    .filter(Boolean);
+  const unit = el("adminItemUnit").value.trim();
+  const unitAr = el("adminItemUnitAr").value.trim();
   const errorEl = el("adminItemFormError");
-  if (!name || !question || options.length < LIMITS.minOptions) {
-    errorEl.textContent = "Please fill in all fields and provide at least 2 options.";
+  if (!name || !question || !unit) {
+    errorEl.textContent = "Please fill in item name, question, and unit.";
     return;
   }
-  await addItemAsAdmin(name, question, options, { nameAr, questionAr });
+  await addItemAsAdmin(name, question, unit, { nameAr, questionAr, unitAr });
   el("adminItemName").value = "";
   el("adminItemNameAr").value = "";
   el("adminItemQuestion").value = "";
   el("adminItemQuestionAr").value = "";
-  optionsContainer.innerHTML = "";
-  addAdminOptionField();
-  addAdminOptionField();
+  el("adminItemUnit").value = "";
+  el("adminItemUnitAr").value = "";
   errorEl.textContent = "";
 });

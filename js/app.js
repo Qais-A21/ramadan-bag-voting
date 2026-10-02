@@ -8,7 +8,6 @@ import {
   query,
   where,
   orderBy,
-  writeBatch,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { t, getLang, setLang, applyDocumentDirection } from "./i18n.js";
@@ -16,9 +15,8 @@ import { escapeHtml, slugify, percent, localize, LIMITS } from "./shared.js";
 
 let uid = null;
 
-// itemId -> { item, options: Map(optionId -> optionData), voteCounts: Map(optionId -> count), myOptionId, votersUnsub }
+// itemId -> { item, quantityCounts: Map(quantity -> count), myQuantity }
 const itemsState = new Map();
-const optionUnsubs = new Map(); // itemId -> unsubscribe fn
 const voterUnsubs = new Map(); // itemId -> unsubscribe fn
 let itemsOrder = []; // ordered list of itemIds as received from the items query
 
@@ -51,8 +49,8 @@ function renderStaticText() {
   el("itemNameInput").placeholder = t("itemNamePlaceholder", lang);
   el("questionLabel").textContent = t("questionLabel", lang);
   el("questionInput").placeholder = t("questionPlaceholder", lang);
-  el("optionsLabel").textContent = t("optionsLabel", lang);
-  el("addOptionBtn").textContent = t("addOption", lang);
+  el("unitLabel").textContent = t("unitLabel", lang);
+  el("unitInput").placeholder = t("unitPlaceholder", lang);
   el("submitItemBtn").textContent = t("submit", lang);
   el("cancelItemBtn").textContent = t("cancel", lang);
 
@@ -68,13 +66,13 @@ function renderStaticText() {
   renderSuggestions();
 }
 
-// ---------- Items, options & votes real-time wiring ----------
+// ---------- Items & votes real-time wiring ----------
 //
-// Vote tallies are never stored as a mutable counter. Instead each vote is its
-// own document (votes/{itemId}/voters/{uid}), and every connected client
-// tallies the live subcollection itself. This means there is no "voteCount"
-// field a malicious client could ever overwrite — the only thing anyone can
-// write is their own single vote document.
+// Voting is free-form: a visitor types a quantity (e.g. "4") next to the
+// item's unit (e.g. "KG") instead of picking from a preset list. Each
+// answer is its own document (votes/{itemId}/voters/{uid}), and every
+// connected client tallies the live subcollection itself — there is no
+// mutable counter field anywhere for a client to tamper with.
 
 function watchItems() {
   const q = query(collection(db, "items"), where("active", "==", true), orderBy("order", "asc"));
@@ -88,19 +86,14 @@ function watchItems() {
       const existing = itemsState.get(itemId);
       itemsState.set(itemId, {
         item: { id: itemId, ...docSnap.data() },
-        options: existing?.options || new Map(),
-        voteCounts: existing?.voteCounts || new Map(),
-        myOptionId: existing?.myOptionId ?? null,
+        quantityCounts: existing?.quantityCounts || new Map(),
+        myQuantity: existing?.myQuantity ?? null,
       });
-      if (!optionUnsubs.has(itemId)) watchOptions(itemId);
       if (!voterUnsubs.has(itemId)) watchVoters(itemId);
     });
-    // Clean up items that disappeared (deactivated/deleted)
     for (const itemId of [...itemsState.keys()]) {
       if (!seenIds.has(itemId)) {
         itemsState.delete(itemId);
-        optionUnsubs.get(itemId)?.();
-        optionUnsubs.delete(itemId);
         voterUnsubs.get(itemId)?.();
         voterUnsubs.delete(itemId);
       }
@@ -110,33 +103,19 @@ function watchItems() {
   });
 }
 
-function watchOptions(itemId) {
-  const q = query(collection(db, "items", itemId, "options"), orderBy("order", "asc"));
-  const unsub = onSnapshot(q, (snap) => {
-    const state = itemsState.get(itemId);
-    if (!state) return;
-    const options = new Map();
-    snap.forEach((d) => options.set(d.id, { id: d.id, ...d.data() }));
-    state.options = options;
-    renderItems();
-    renderResults();
-  });
-  optionUnsubs.set(itemId, unsub);
-}
-
 function watchVoters(itemId) {
   const unsub = onSnapshot(collection(db, "votes", itemId, "voters"), (snap) => {
     const state = itemsState.get(itemId);
     if (!state) return;
     const counts = new Map();
-    let myOptionId = null;
+    let myQuantity = null;
     snap.forEach((d) => {
       const data = d.data();
-      counts.set(data.optionId, (counts.get(data.optionId) || 0) + 1);
-      if (d.id === uid) myOptionId = data.optionId;
+      counts.set(data.quantity, (counts.get(data.quantity) || 0) + 1);
+      if (d.id === uid) myQuantity = data.quantity;
     });
-    state.voteCounts = counts;
-    state.myOptionId = myOptionId;
+    state.quantityCounts = counts;
+    state.myQuantity = myQuantity;
     renderItems();
     renderResults();
   });
@@ -175,17 +154,13 @@ function watchSuggestionVoters(suggestionId) {
 }
 
 // ---------- Voting ----------
-// Casting/changing a vote is a single document write (own vote doc). That
-// single write is already atomic — there is nothing else to keep in sync.
+// Submitting/changing an answer is a single document write (own vote doc).
+// That single write is already atomic — there is nothing else to keep in sync.
 
-async function castVote(itemId, optionId) {
-  const state = itemsState.get(itemId);
-  if (!state) return;
-  if (state.myOptionId === optionId) return; // no-op, already voted this way
-
+async function castVote(itemId, quantity) {
   const voterRef = doc(db, "votes", itemId, "voters", uid);
   try {
-    await setDoc(voterRef, { optionId, votedAt: serverTimestamp() });
+    await setDoc(voterRef, { quantity, votedAt: serverTimestamp() });
   } catch (err) {
     console.error("Vote failed", err);
     alert(t("errorGeneric"));
@@ -194,22 +169,17 @@ async function castVote(itemId, optionId) {
 
 // ---------- Add item ----------
 
-async function submitNewItem(name, question, options) {
+async function submitNewItem(name, question, unit) {
   const itemRef = doc(collection(db, "items"));
-  const batch = writeBatch(db);
-  batch.set(itemRef, {
+  await setDoc(itemRef, {
     name,
     question,
+    unit,
     active: true,
     order: Date.now(),
     createdAt: serverTimestamp(),
     createdBy: uid,
   });
-  options.forEach((label, idx) => {
-    const optRef = doc(collection(db, "items", itemRef.id, "options"));
-    batch.set(optRef, { label, order: idx });
-  });
-  await batch.commit();
 }
 
 // ---------- Suggestions ----------
@@ -256,45 +226,72 @@ function renderItems() {
     .map((itemId) => {
       const state = itemsState.get(itemId);
       if (!state) return "";
-      const { item, options, voteCounts, myOptionId } = state;
-      const optionsArr = [...options.values()];
-      const total = optionsArr.reduce((sum, o) => sum + (voteCounts.get(o.id) || 0), 0);
+      const { item, quantityCounts, myQuantity } = state;
+      const unit = localize(item, "unit", lang);
+      const total = [...quantityCounts.values()].reduce((a, b) => a + b, 0);
+      const sortedEntries = [...quantityCounts.entries()].sort((a, b) => a[0] - b[0]);
 
-      const optionsHtml = optionsArr
-        .map((opt) => {
-          const count = voteCounts.get(opt.id) || 0;
-          const pct = percent(count, total);
-          const isMine = myOptionId === opt.id;
-          return `
-            <button
-              class="vote-option ${isMine ? "vote-option--selected" : ""}"
-              data-item-id="${itemId}"
-              data-option-id="${opt.id}"
-              aria-pressed="${isMine}"
-            >
-              <span class="vote-option__bar" style="width:${pct}%"></span>
-              <span class="vote-option__content">
-                <span class="vote-option__label">${escapeHtml(localize(opt, "label", lang))}</span>
-                <span class="vote-option__count">${count} ${count === 1 ? t("vote", lang) : t("votes", lang)} · ${pct}%</span>
-              </span>
-            </button>`;
-        })
-        .join("");
+      const distributionHtml =
+        total === 0
+          ? `<p class="quantity-empty">${t("noAnswersYet", lang)}</p>`
+          : sortedEntries
+              .map(([qty, count]) => {
+                const pct = percent(count, total);
+                const isMine = myQuantity === qty;
+                return `
+                  <div class="quantity-row ${isMine ? "quantity-row--mine" : ""}">
+                    <span class="quantity-row__label">${formatQty(qty)} ${escapeHtml(unit)}</span>
+                    <div class="quantity-row__track"><div class="quantity-row__fill" style="width:${pct}%"></div></div>
+                    <span class="quantity-row__meta">${count} ${count === 1 ? t("vote", lang) : t("votes", lang)} · ${pct}%</span>
+                  </div>`;
+              })
+              .join("");
 
       return `
         <article class="item-card">
           <h3 class="item-card__name">${escapeHtml(localize(item, "name", lang))}</h3>
           <p class="item-card__question">${escapeHtml(localize(item, "question", lang))}</p>
-          <div class="item-card__options">${optionsHtml}</div>
+          <form class="quantity-form" data-item-id="${itemId}">
+            <input
+              type="number"
+              class="quantity-input"
+              inputmode="decimal"
+              min="${LIMITS.quantityMin}"
+              max="${LIMITS.quantityMax}"
+              step="0.5"
+              placeholder="${t("quantityPlaceholder", lang)}"
+              value="${myQuantity ?? ""}"
+              required
+            />
+            <span class="quantity-unit">${escapeHtml(unit)}</span>
+            <button type="submit" class="btn-primary quantity-submit">${myQuantity != null ? t("updateVote", lang) : t("submitVote", lang)}</button>
+          </form>
+          ${myQuantity != null ? `<p class="quantity-my-answer">${t("yourAnswerIs", lang)} <strong>${formatQty(myQuantity)} ${escapeHtml(unit)}</strong></p>` : ""}
+          <div class="quantity-distribution">
+            <p class="quantity-distribution__heading">${t("distributionHeading", lang)}</p>
+            ${distributionHtml}
+          </div>
         </article>`;
     })
     .join("");
 
-  container.querySelectorAll("[data-item-id]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      castVote(btn.dataset.itemId, btn.dataset.optionId);
+  container.querySelectorAll(".quantity-form").forEach((form) => {
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const itemId = form.dataset.itemId;
+      const input = form.querySelector(".quantity-input");
+      const value = Number(input.value);
+      if (!Number.isFinite(value) || value <= 0 || value > LIMITS.quantityMax) {
+        alert(t("errorInvalidQuantity"));
+        return;
+      }
+      castVote(itemId, value);
     });
   });
+}
+
+function formatQty(qty) {
+  return Number.isInteger(qty) ? String(qty) : String(qty).replace(/\.0$/, "");
 }
 
 function renderResults() {
@@ -308,19 +305,17 @@ function renderResults() {
     .map((itemId) => {
       const state = itemsState.get(itemId);
       if (!state) return "";
-      const { item, options, voteCounts } = state;
-      const optionsArr = [...options.values()].sort(
-        (a, b) => (voteCounts.get(b.id) || 0) - (voteCounts.get(a.id) || 0)
-      );
-      const total = optionsArr.reduce((sum, o) => sum + (voteCounts.get(o.id) || 0), 0);
+      const { item, quantityCounts } = state;
+      const unit = localize(item, "unit", lang);
+      const total = [...quantityCounts.values()].reduce((a, b) => a + b, 0);
       if (total === 0) return "";
-      const rows = optionsArr
-        .map((opt) => {
-          const count = voteCounts.get(opt.id) || 0;
+      const sortedEntries = [...quantityCounts.entries()].sort((a, b) => b[1] - a[1]);
+      const rows = sortedEntries
+        .map(([qty, count]) => {
           const pct = percent(count, total);
           return `
             <div class="results-row">
-              <span class="results-row__label">${escapeHtml(localize(opt, "label", lang))}</span>
+              <span class="results-row__label">${formatQty(qty)} ${escapeHtml(unit)}</span>
               <div class="results-row__track"><div class="results-row__fill" style="width:${pct}%"></div></div>
               <span class="results-row__pct">${pct}%</span>
             </div>`;
@@ -362,60 +357,35 @@ function renderSuggestions() {
 
 function setupAddItemModal() {
   const modal = el("addItemModal");
-  const optionsContainer = el("optionsContainer");
-
-  function addOptionField(value = "") {
-    if (optionsContainer.children.length >= LIMITS.maxOptions) return;
-    const wrapper = document.createElement("div");
-    wrapper.className = "option-field";
-    wrapper.innerHTML = `
-      <input type="text" class="option-input" maxlength="${LIMITS.optionLabel}" value="${escapeHtml(value)}" placeholder="${t("optionPlaceholder")}" />
-      <button type="button" class="option-remove" aria-label="${t("removeOption")}">&times;</button>
-    `;
-    wrapper.querySelector(".option-remove").addEventListener("click", () => {
-      if (optionsContainer.children.length > LIMITS.minOptions) wrapper.remove();
-    });
-    optionsContainer.appendChild(wrapper);
-  }
 
   el("addItemBtn").addEventListener("click", () => {
     el("itemNameInput").value = "";
     el("questionInput").value = "";
-    optionsContainer.innerHTML = "";
-    addOptionField();
-    addOptionField();
+    el("unitInput").value = "";
     el("itemFormError").textContent = "";
     modal.classList.remove("hidden");
   });
 
   el("cancelItemBtn").addEventListener("click", () => modal.classList.add("hidden"));
-  el("addOptionBtn").addEventListener("click", () => addOptionField());
 
   el("addItemForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = el("itemNameInput").value.trim();
     const question = el("questionInput").value.trim();
-    const options = [...optionsContainer.querySelectorAll(".option-input")]
-      .map((i) => i.value.trim())
-      .filter(Boolean);
+    const unit = el("unitInput").value.trim();
 
     const errorEl = el("itemFormError");
-    if (!name || !question || options.length < LIMITS.minOptions) {
-      errorEl.textContent = options.length < LIMITS.minOptions ? t("errorMinOptions") : t("errorRequired");
+    if (!name || !question || !unit) {
+      errorEl.textContent = t("errorRequired");
       return;
     }
-    if (name.length > LIMITS.itemName || question.length > LIMITS.question || options.some((o) => o.length > LIMITS.optionLabel)) {
+    if (name.length > LIMITS.itemName || question.length > LIMITS.question || unit.length > LIMITS.unit) {
       errorEl.textContent = t("errorTooLong");
-      return;
-    }
-    const uniqueOptions = new Set(options.map((o) => o.toLowerCase()));
-    if (uniqueOptions.size !== options.length) {
-      errorEl.textContent = t("errorDuplicateOptions");
       return;
     }
 
     try {
-      await submitNewItem(name, question, options);
+      await submitNewItem(name, question, unit);
       modal.classList.add("hidden");
     } catch (err) {
       console.error(err);

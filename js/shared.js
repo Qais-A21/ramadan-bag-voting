@@ -30,8 +30,8 @@ export function percent(part, total) {
 export const LIMITS = {
   itemName: 100,
   question: 200,
-  optionLabel: 50,
+  unit: 20,
   suggestionName: 60,
-  maxOptions: 8,
-  minOptions: 2,
+  quantityMin: 0.5,
+  quantityMax: 1000,
 };

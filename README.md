@@ -82,8 +82,8 @@ Then open `http://localhost:5500`.
 ## 6. Seed the demo data
 
 In `admin.html`, click **"Seed Rice / Pasta / Oil / Beans"** once. This creates the four starter
-items (Rice, Pasta, Oil, Beans) with their default quantity options, exactly as described in the
-spec. You can edit/deactivate them afterwards, or just add your real items instead.
+items (Rice, Pasta, Oil, Beans), each with its own unit (KG / bottles / packs) and Arabic
+translation. You can edit/deactivate them afterwards, or just add your real items instead.
 
 ## 7. Deploy to Firebase Hosting (optional)
 
@@ -93,40 +93,42 @@ firebase deploy --only hosting
 
 ## How it works
 
+- **Free-form quantity voting:** instead of picking from a preset list of options, a visitor types
+  the quantity they want (e.g. `4`) next to the item's fixed unit label (e.g. `KG`) and submits.
+  There's no preset "options" list to manage at all — the distribution shown under each item
+  (and in the "Current Preferences" summary) is built live from whatever quantities people have
+  actually typed in.
 - **Real-time sync:** `index.html`/`admin.html` attach Firestore `onSnapshot` listeners to the
-  `items` collection, each item's `options` subcollection, each user's own vote doc, and
-  `suggestions`. Any write from any device re-fires these listeners on every other connected
-  device instantly — there is no polling and no manual refresh.
+  `items` collection, each item's `votes/{itemId}/voters` subcollection, and `suggestions`. Any
+  write from any device re-fires these listeners on every other connected device instantly —
+  there is no polling and no manual refresh.
 - **Anonymous identity:** on load, `js/firebase-init.js` signs the visitor in anonymously via
   Firebase Auth. That `uid` is stable for the browser/device (persisted by the Firebase SDK) and
-  is used as the document ID for `votes/{itemId}/voters/{uid}`, which is what makes "one vote per
+  is used as the document ID for `votes/{itemId}/voters/{uid}`, which is what makes "one answer per
   item per device" structural rather than merely enforced in the UI.
-- **No mutable vote counters, by design:** instead of a `voteCount` field that a client could try
-  to overwrite directly, each vote is its own document
-  (`votes/{itemId}/voters/{uid}`, one per user per item). Casting or changing a vote is a single
-  `setDoc` write to that one document — already atomic, no transaction needed. Every connected
-  client tallies the live `votes/{itemId}/voters` subcollection itself via `onSnapshot`, so
-  results update in real time and there is simply no counter field left for anyone to tamper
-  with (there's no `voteCount: 10000` attack possible, because `voteCount` doesn't exist).
-  Suggestion popularity works the same way via `suggestions/{id}/voters`.
+- **No mutable vote counters, by design:** each vote is its own document
+  (`votes/{itemId}/voters/{uid}`, one per user per item) holding the `quantity` that user typed.
+  Submitting or changing an answer is a single `setDoc` write to that one document — already
+  atomic, no transaction needed. Every connected client tallies the live
+  `votes/{itemId}/voters` subcollection itself via `onSnapshot`, grouping by the exact quantity
+  value, so there is no counter field anywhere for a client to tamper with. Suggestion popularity
+  works the same way via `suggestions/{id}/voters`.
 - **Security rules** (`firestore.rules`) only let a user create/update their *own* vote document
-  (doc id = their uid), and only pointing at an option that actually exists for that item.
-  Re-"suggesting" an item you already suggested becomes a Firestore *update* (since the voter doc
-  already exists), which is explicitly disallowed — so duplicate suggestion-bumps are rejected
-  structurally, not just by UI convention. Item/option creation is validated for required fields
-  and length limits; only admins (presence of an `admins/{uid}` doc) can edit/delete items,
-  options, or approve/reject suggestions.
+  (doc id = their uid), and only with a `quantity` that's a number within a sane range
+  (`0 < quantity <= 1000`) — so a client can't submit garbage or absurd values. Re-"suggesting" an
+  item you already suggested becomes a Firestore *update* (since the voter doc already exists),
+  which is explicitly disallowed — so duplicate suggestion-bumps are rejected structurally, not
+  just by UI convention. Item creation is validated for required fields and length limits; only
+  admins (presence of an `admins/{uid}` doc) can edit/delete items or approve/reject suggestions.
 
 ## Firestore schema
 
 ```
 items/{itemId}
-  name, question, active, order, createdAt, createdBy
-  options/{optionId}
-    label, order
+  name, nameAr?, question, questionAr?, unit, unitAr?, active, order, createdAt, createdBy
 
-votes/{itemId}/voters/{uid}        (doc id = uid -> one vote per user per item)
-  optionId, votedAt
+votes/{itemId}/voters/{uid}        (doc id = uid -> one answer per user per item)
+  quantity, votedAt
 
 suggestions/{suggestionId}        (doc id = slugified name, so duplicates merge)
   name, status ("pending" | "approved" | "rejected"), createdAt, createdBy
@@ -137,15 +139,19 @@ admins/{uid}
   (presence of the doc = admin; managed manually via console)
 ```
 
-Vote/suggestion counts are never stored — every client computes them live by counting documents
-in the `voters` subcollections above.
+Vote/suggestion counts are never stored — every client computes them live by counting/grouping
+documents in the `voters` subcollections above. The `*Ar` fields are optional; when present the
+page shows them while in Arabic mode, falling back to the English field otherwise.
 
 ## Known MVP trade-offs
 
-- Arabic translations exist for all UI chrome; user-generated item/question/option text is stored
-  as typed (no auto-translation), same as any real survey tool.
+- Arabic translations exist for all UI chrome, and admin-created items can carry real
+  `nameAr`/`questionAr`/`unitAr` translations (the seeded Rice/Pasta/Oil/Beans do). Items added by
+  the public via "+ Add Item" are stored as typed, with no auto-translation, same as any real
+  survey tool.
 - There's no email verification/password-reset flow for admins — add/manage admin users and the
   `admins/{uid}` grant doc directly in the Firebase console, which is enough for a small trusted
   team.
-- Order of newly added items/options uses a client timestamp (`Date.now()`), which is fine at
-  this scale; admins can still deactivate/reorder by editing `order` in the console if needed.
+- Order of newly added items uses a client timestamp (`Date.now()`), which is fine at this scale.
+- Quantities accept any positive number up to 1000 in steps of 0.5 on the input control; the
+  security rules independently enforce the same upper bound server-side.
