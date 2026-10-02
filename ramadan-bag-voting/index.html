@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ramadan Bag — Your Voice, Your Bag</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body class="min-h-screen bg-[var(--bg)] text-stone-800">
+  <div class="max-w-2xl mx-auto px-4 pb-16">
+
+    <header class="pt-8 pb-6 text-center relative">
+      <button id="langToggleBtn" class="lang-toggle" type="button">العربية</button>
+      <div class="moon-badge" aria-hidden="true">🌙</div>
+      <h1 id="pageTitle" class="text-2xl sm:text-3xl font-extrabold text-emerald-900 mt-2"></h1>
+      <p id="pageSubtitle" class="text-stone-600 mt-2 text-base sm:text-lg leading-relaxed"></p>
+    </header>
+
+    <section class="card-panel mb-6">
+      <h2 id="resultsHeading" class="section-heading"></h2>
+      <div id="resultsList" class="space-y-5"></div>
+    </section>
+
+    <section class="mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <h2 id="itemsHeading" class="section-heading !mb-0"></h2>
+        <button id="addItemBtn" type="button" class="btn-primary"></button>
+      </div>
+      <div id="itemsList" class="space-y-4"></div>
+    </section>
+
+    <section class="card-panel">
+      <div class="flex items-center justify-between mb-3">
+        <h2 id="suggestedHeading" class="section-heading !mb-0"></h2>
+        <button id="suggestItemBtn" type="button" class="btn-secondary"></button>
+      </div>
+      <div id="suggestionsList" class="flex flex-wrap gap-2"></div>
+    </section>
+
+    <footer class="text-center mt-10 text-sm text-stone-500 space-y-2">
+      <p id="footerNote"></p>
+      <a id="adminLink" href="admin.html" class="underline hover:text-emerald-800"></a>
+    </footer>
+  </div>
+
+  <!-- Add Item Modal -->
+  <div id="addItemModal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <h3 id="modalAddItemTitle" class="modal-title"></h3>
+      <form id="addItemForm" class="space-y-4">
+        <div>
+          <label id="itemNameLabel" class="form-label"></label>
+          <input id="itemNameInput" type="text" class="form-input" maxlength="100" required />
+        </div>
+        <div>
+          <label id="questionLabel" class="form-label"></label>
+          <input id="questionInput" type="text" class="form-input" maxlength="200" required />
+        </div>
+        <div>
+          <label id="optionsLabel" class="form-label"></label>
+          <div id="optionsContainer" class="space-y-2"></div>
+          <button id="addOptionBtn" type="button" class="btn-link mt-2"></button>
+        </div>
+        <p id="itemFormError" class="form-error"></p>
+        <div class="flex gap-3 pt-2">
+          <button id="cancelItemBtn" type="button" class="btn-secondary flex-1"></button>
+          <button id="submitItemBtn" type="submit" class="btn-primary flex-1"></button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Suggest Item Modal -->
+  <div id="suggestItemModal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <h3 id="modalSuggestTitle" class="modal-title"></h3>
+      <form id="suggestItemForm" class="space-y-4">
+        <div>
+          <label id="suggestNameLabel" class="form-label"></label>
+          <input id="suggestNameInput" type="text" class="form-input" maxlength="60" required />
+        </div>
+        <p id="suggestFormError" class="form-error"></p>
+        <div class="flex gap-3 pt-2">
+          <button id="cancelSuggestBtn" type="button" class="btn-secondary flex-1"></button>
+          <button id="submitSuggestBtn" type="submit" class="btn-primary flex-1"></button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
