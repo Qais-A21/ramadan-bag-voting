@@ -185,12 +185,14 @@ async function addItemAsAdmin(name, question, unit, extra = {}) {
   });
 }
 
-async function approveSuggestion(suggestionId, name, question, unit) {
+// The question is never custom-typed — it's always auto-built from the
+// item name, so every approved item asks a consistent "how much" question.
+async function approveSuggestion(suggestionId, name, unit) {
   const itemRef = doc(collection(db, "items"));
   const batch = writeBatch(db);
   batch.set(itemRef, {
     name,
-    question,
+    question: `How much ${name} would you prefer?`,
     unit,
     active: true,
     order: Date.now(),
@@ -288,9 +290,16 @@ function renderAdminSuggestions() {
           </div>
         </div>
         ${quantitiesHtml}
+        <p class="text-xs text-stone-400 mb-2">Will ask: "How much ${escapeHtml(name)} would you prefer?"</p>
         <form class="approve-form hidden space-y-2" data-approve-form="${s.data.id}">
-          <input type="text" class="form-input text-sm" data-field="question" placeholder="Question (e.g. How much ${escapeHtml(name)} would you prefer?)" required />
-          <input type="text" class="form-input text-sm" data-field="unit" placeholder="Unit (e.g. KG, bottles, packs)" required />
+          <select class="form-input text-sm" data-field="unitSelect" required>
+            <option value="" disabled selected>Select unit…</option>
+            <option value="KG">KG</option>
+            <option value="Pack">Pack</option>
+            <option value="Bottle">Bottle</option>
+            <option value="__other__">Other (type below)</option>
+          </select>
+          <input type="text" class="form-input text-sm hidden" data-field="unitOther" placeholder="Custom unit" maxlength="20" />
           <button type="submit" class="btn-primary text-sm">Create Item</button>
         </form>
       </div>`;
@@ -307,17 +316,24 @@ function renderAdminSuggestions() {
     btn.addEventListener("click", () => rejectSuggestion(btn.dataset.reject));
   });
   container.querySelectorAll("[data-approve-form]").forEach((form) => {
+    const select = form.querySelector('[data-field="unitSelect"]');
+    const otherInput = form.querySelector('[data-field="unitOther"]');
+    select.addEventListener("change", () => {
+      const isOther = select.value === "__other__";
+      otherInput.classList.toggle("hidden", !isOther);
+      otherInput.required = isOther;
+    });
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const suggestionId = form.dataset.approveForm;
       const suggestion = suggestionsState.get(suggestionId);
-      const question = form.querySelector('[data-field="question"]').value.trim();
-      const unit = form.querySelector('[data-field="unit"]').value.trim();
-      if (!question || !unit) {
-        alert("Please provide a question and a unit.");
+      const unit = select.value === "__other__" ? otherInput.value.trim() : select.value;
+      if (!unit) {
+        alert("Please select or enter a unit.");
         return;
       }
-      await approveSuggestion(suggestionId, suggestion.data.name, question, unit);
+      await approveSuggestion(suggestionId, suggestion.data.name, unit);
     });
   });
 }

@@ -136,7 +136,11 @@ function watchSuggestions() {
     snap.forEach((d) => {
       seen.add(d.id);
       const existing = suggestionsState.get(d.id);
-      suggestionsState.set(d.id, { data: { id: d.id, ...d.data() }, voterCount: existing?.voterCount ?? 0 });
+      suggestionsState.set(d.id, {
+        data: { id: d.id, ...d.data() },
+        voterCount: existing?.voterCount ?? 0,
+        quantityTexts: existing?.quantityTexts ?? [],
+      });
       if (!suggestionVoterUnsubs.has(d.id)) watchSuggestionVoters(d.id);
     });
     for (const id of [...suggestionsState.keys()]) {
@@ -147,6 +151,7 @@ function watchSuggestions() {
       }
     }
     renderSuggestions();
+    renderResults();
   });
 }
 
@@ -155,7 +160,13 @@ function watchSuggestionVoters(suggestionId) {
     const s = suggestionsState.get(suggestionId);
     if (!s) return;
     s.voterCount = snap.size;
+    s.quantityTexts = [];
+    snap.forEach((d) => {
+      const qty = d.data().quantityText;
+      if (qty) s.quantityTexts.push(qty);
+    });
     renderSuggestions();
+    renderResults();
   });
   suggestionVoterUnsubs.set(suggestionId, unsub);
 }
@@ -310,11 +321,8 @@ function formatQty(qty) {
 function renderResults() {
   const container = el("resultsList");
   const lang = getLang();
-  if (itemsOrder.length === 0) {
-    container.innerHTML = "";
-    return;
-  }
-  container.innerHTML = itemsOrder
+
+  const itemsHtml = itemsOrder
     .map((itemId) => {
       const state = itemsState.get(itemId);
       if (!state) return "";
@@ -342,9 +350,43 @@ function renderResults() {
     })
     .join("");
 
-  if (!container.innerHTML.trim()) {
-    container.innerHTML = `<p class="text-center text-stone-500 py-4">${t("loading", lang)}</p>`;
-  }
+  // Suggested-but-not-yet-approved items are shown here too, grouped by the
+  // free-text quantity each person typed when suggesting them, so their
+  // requested amounts are visible in Current Preferences right away.
+  const suggestionsHtml = [...suggestionsState.values()]
+    .filter((s) => s.voterCount > 0)
+    .sort((a, b) => b.voterCount - a.voterCount)
+    .map((s) => {
+      const counts = new Map();
+      s.quantityTexts.forEach((qty) => counts.set(qty, (counts.get(qty) || 0) + 1));
+      const total = s.quantityTexts.length;
+      const rows =
+        total === 0
+          ? `<p class="quantity-empty">${t("noAnswersYet", lang)}</p>`
+          : [...counts.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([qty, count]) => {
+                const pct = percent(count, total);
+                return `
+                  <div class="results-row">
+                    <span class="results-row__label">${escapeHtml(qty)}</span>
+                    <div class="results-row__track"><div class="results-row__fill" style="width:${pct}%"></div></div>
+                    <span class="results-row__pct">${pct}%</span>
+                  </div>`;
+              })
+              .join("");
+      return `
+        <div class="results-item">
+          <h4 class="results-item__name">${escapeHtml(s.data.name)} <span class="results-item__badge">${t("suggestedBadge", lang)}</span></h4>
+          ${rows}
+        </div>`;
+    })
+    .join("");
+
+  const combined = itemsHtml + suggestionsHtml;
+  container.innerHTML = combined.trim()
+    ? combined
+    : `<p class="text-center text-stone-500 py-4">${t("loading", lang)}</p>`;
 }
 
 function renderSuggestions() {

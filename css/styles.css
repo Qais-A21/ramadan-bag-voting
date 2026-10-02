@@ -214,6 +214,16 @@ html[dir="rtl"] body {
   color: var(--accent-dark);
   margin-bottom: 0.4rem;
 }
+.results-item__badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--gold);
+  background: #faf1dc;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  margin-inline-start: 0.3rem;
+  vertical-align: middle;
+}
 
 .results-row {
   display: flex;
