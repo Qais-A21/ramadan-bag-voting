@@ -126,7 +126,11 @@ function watchSuggestions() {
     snap.forEach((d) => {
       seen.add(d.id);
       const existing = suggestionsState.get(d.id);
-      suggestionsState.set(d.id, { data: { id: d.id, ...d.data() }, voterCount: existing?.voterCount ?? 0 });
+      suggestionsState.set(d.id, {
+        data: { id: d.id, ...d.data() },
+        voterCount: existing?.voterCount ?? 0,
+        quantityTexts: existing?.quantityTexts ?? [],
+      });
       if (!suggestionVoterUnsubs.has(d.id)) watchSuggestionVoters(d.id);
     });
     for (const id of [...suggestionsState.keys()]) {
@@ -145,6 +149,11 @@ function watchSuggestionVoters(suggestionId) {
     const s = suggestionsState.get(suggestionId);
     if (!s) return;
     s.voterCount = snap.size;
+    s.quantityTexts = [];
+    snap.forEach((d) => {
+      const qty = d.data().quantityText;
+      if (qty) s.quantityTexts.push(qty);
+    });
     renderAdminSuggestions();
   });
   suggestionVoterUnsubs.set(suggestionId, unsub);
@@ -266,6 +275,9 @@ function renderAdminSuggestions() {
   container.innerHTML = arr
     .map((s) => {
       const name = s.data.name;
+      const quantitiesHtml = s.quantityTexts.length
+        ? `<p class="text-sm text-stone-500 mb-2">Requested amounts: ${s.quantityTexts.map(escapeHtml).join(", ")}</p>`
+        : "";
       return `
       <div class="admin-card">
         <div class="flex items-center justify-between mb-2">
@@ -275,6 +287,7 @@ function renderAdminSuggestions() {
             <button class="btn-primary text-sm" data-approve="${s.data.id}">Approve &rarr; Item</button>
           </div>
         </div>
+        ${quantitiesHtml}
         <form class="approve-form hidden space-y-2" data-approve-form="${s.data.id}">
           <input type="text" class="form-input text-sm" data-field="question" placeholder="Question (e.g. How much ${escapeHtml(name)} would you prefer?)" required />
           <input type="text" class="form-input text-sm" data-field="unit" placeholder="Unit (e.g. KG, bottles, packs)" required />

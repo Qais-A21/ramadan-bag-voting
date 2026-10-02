@@ -32,6 +32,7 @@ export const LIMITS = {
   question: 200,
   unit: 20,
   suggestionName: 60,
+  quantityText: 50,
   quantityMin: 0.5,
   quantityMax: 1000,
 };

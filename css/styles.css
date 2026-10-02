@@ -132,6 +132,23 @@ html[dir="rtl"] body {
   color: var(--accent-dark);
   margin-bottom: 0.6rem;
 }
+.quantity-my-answer.hidden {
+  display: none;
+}
+
+.others-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+@media (min-width: 480px) {
+  .others-form {
+    flex-direction: row;
+  }
+  .others-form .form-input {
+    flex: 1;
+  }
+}
 
 .quantity-distribution {
   border-top: 1px dashed #e8dfc8;

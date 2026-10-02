@@ -61,6 +61,13 @@ function renderStaticText() {
   el("submitSuggestBtn").textContent = t("submitSuggestion", lang);
   el("cancelSuggestBtn").textContent = t("cancel", lang);
 
+  // Others card
+  el("othersTitle").textContent = t("othersTitle", lang);
+  el("othersQuestion").textContent = t("othersQuestion", lang);
+  el("othersNameInput").placeholder = t("othersNamePlaceholder", lang);
+  el("othersQuantityInput").placeholder = t("othersQuantityPlaceholder", lang);
+  el("othersForm").querySelector("button[type=submit]").textContent = t("othersSubmit", lang);
+
   renderItems();
   renderResults();
   renderSuggestions();
@@ -184,7 +191,10 @@ async function submitNewItem(name, question, unit) {
 
 // ---------- Suggestions ----------
 
-async function submitSuggestion(name) {
+// `quantityText` is optional free text (e.g. "2 boxes") capturing how much
+// of that suggested item this particular person would want — shown to
+// admins when deciding whether/how to turn a suggestion into a real item.
+async function submitSuggestion(name, quantityText = "") {
   const slug = slugify(name);
   const suggRef = doc(db, "suggestions", slug);
   const voterRef = doc(db, "suggestions", slug, "voters", uid);
@@ -206,7 +216,10 @@ async function submitSuggestion(name) {
   }
 
   try {
-    await setDoc(voterRef, { suggestedAt: serverTimestamp() });
+    await setDoc(voterRef, {
+      suggestedAt: serverTimestamp(),
+      ...(quantityText ? { quantityText } : {}),
+    });
   } catch (err) {
     if (err.code === "permission-denied") throw new Error("ALREADY_SUGGESTED");
     throw err;
@@ -430,6 +443,42 @@ function setupSuggestModal() {
   });
 }
 
+function setupOthersCard() {
+  el("othersForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = el("othersNameInput").value.trim();
+    const quantityText = el("othersQuantityInput").value.trim();
+    const errorEl = el("othersError");
+    const successEl = el("othersSuccess");
+    successEl.classList.add("hidden");
+    errorEl.textContent = "";
+
+    if (!name) {
+      errorEl.textContent = t("errorRequired");
+      return;
+    }
+    if (name.length > LIMITS.suggestionName || quantityText.length > LIMITS.quantityText) {
+      errorEl.textContent = t("errorTooLong");
+      return;
+    }
+
+    try {
+      await submitSuggestion(name, quantityText);
+      el("othersNameInput").value = "";
+      el("othersQuantityInput").value = "";
+      successEl.textContent = t("othersSuccess");
+      successEl.classList.remove("hidden");
+    } catch (err) {
+      if (err.message === "ALREADY_SUGGESTED") {
+        errorEl.textContent = t("alreadySuggested");
+      } else {
+        console.error(err);
+        errorEl.textContent = t("errorGeneric");
+      }
+    }
+  });
+}
+
 function setupLangToggle() {
   el("langToggleBtn").addEventListener("click", () => {
     const next = getLang() === "en" ? "ar" : "en";
@@ -445,6 +494,7 @@ async function main() {
   renderStaticText();
   setupAddItemModal();
   setupSuggestModal();
+  setupOthersCard();
   setupLangToggle();
 
   const user = await waitForUser();

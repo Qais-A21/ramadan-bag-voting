@@ -91,8 +91,15 @@ service cloud.firestore {
         // One doc per user per suggestion; re-"suggesting" becomes an update
         // (doc already exists) which is disallowed, so duplicates are
         // structurally rejected rather than silently double-counted.
-        allow create: if isSignedIn() && request.auth.uid == uid;
+        // `quantityText` is optional free text (e.g. "2 boxes") the admin
+        // sees when deciding how to turn a suggestion into a real item.
+        allow create: if isSignedIn() && request.auth.uid == uid && isValidSuggestionVoter();
         allow update, delete: if false;
+
+        function isValidSuggestionVoter() {
+          let d = request.resource.data;
+          return !("quantityText" in d) || (d.quantityText is string && d.quantityText.size() <= 50);
+        }
       }
     }
   }
